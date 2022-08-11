@@ -1,0 +1,169 @@
+#!/bin/env bash
+
+#LoginNotify v1.0 by Xpyct. https://github.com/Xpyctiks/loginNotify
+
+PATH=/bin:/usr/bin:/usr/sbin/:/usr/local/bin
+#token of your Telegram chat API
+token=""
+#ChatID of Telegram chat you want send to
+chat=""
+sessType=""
+dbName=""
+dbUser=""
+dbPass=""
+#Getting hostname.Try to get full FQDN from the mailname, if not - just get local hostname
+if [[ -s /etc/mailname ]]; then
+    hostName=`cat /etc/mailname`
+else
+    hostName=`hostname`
+fi
+
+#Check do we have all variables setted up.
+if [[ -z ${dbName} || -z ${dbPass} || -z ${dbUser} || -z ${token} || -z ${chat} ]]; then
+  echo "One or more variables are not defined. Please check settings!"
+  exit 1
+fi
+
+#Check has it been launched from PAM or not. If not - break.
+if [[ -z ${PAM_RHOST} || -z ${PAM_TYPE} || -z ${PAM_USER} ]]; then
+  echo "Can't get PAM variables. Seems like the script launched no by PAM. Exiting."
+  exit 1
+fi
+
+#This part used to init database before usage of the script
+#If the init function is called
+if [ "$1" == "initDB" ]; then
+    #check do we have enough parameters,else show up a hint.
+    if [ "$#" -lt 5 ]; then
+       echo -e "Usage: ./<this_script_name> initDB <mysql_root_pwd> <db_name> <db_user> <db_pwd>"
+	   echo -e "\t<mysql_root_pwd> - password of mysql root account to create everything we need. Type \"-\" if not need to use pwd for root access to mysql\n\t<db_name> - The name of DB you want to create\n\t<db_user> - user of the new DB\n\t<db_pwd> - password you want to set for new DB\n"
+       exit 1
+    fi
+    #decide what method of mysql auth should we use - with pwd or not
+    addition=""
+    if [ "$2" == "-" ]; then
+        addition="-uroot"
+    else
+        addition="-uroot -p${2}"
+    fi
+#main function. shoudn't start with any tab.
+mysql ${addition} << EOF
+CREATE DATABASE \`${3}\` DEFAULT CHARACTER SET utf8 COLLATE utf8_bin;
+USE \`${3}\`;
+CREATE TABLE \`tIPs\` (
+  \`Id\` int(10) UNSIGNED NOT NULL,
+  \`IP\` varchar(18) COLLATE utf8_bin NOT NULL,
+  \`Created\` datetime NOT NULL DEFAULT current_timestamp(),
+  \`Comment\` varchar(500) COLLATE utf8_bin DEFAULT NULL
+) ENGINE=InnoDB DEFAULT CHARSET=utf8 COLLATE=utf8_bin;
+ALTER TABLE \`tIPs\` ADD PRIMARY KEY (\`Id\`), ADD UNIQUE KEY \`IP\` (\`IP\`);
+ALTER TABLE \`tIPs\` MODIFY \`Id\` int(10) UNSIGNED NOT NULL AUTO_INCREMENT, AUTO_INCREMENT=1;
+CREATE USER '${4}'@'localhost' IDENTIFIED BY '${5}';
+GRANT ALL ON ${3}.* to '${4}'@'localhost';
+FLUSH PRIVILEGES;
+EOF
+    #check if the previous actions were successfull
+    if [ "$?" == "0" ]; then
+        echo "Database initialized successfully"
+        echo -e "Now you need to edit this script end set the next variables at the top of script to:"
+        echo -e "\tdbName=\"${3}\""
+        echo -e "\tdbUser=\"${4}\""
+        echo -e "\tdbPass=\"${5}\""
+        echo -e "and finally: Add to the end of /etc/pam.d/sshd next string: \"session optional pam_exec.so <path_to_this_script>/<this_script_name>\""
+        exit 0
+    else
+        echo "DB is NOT initialized because of some errors - unable to connect/DB already exists/etc. Needs to be checked manually.\n"
+        exit 1
+    fi
+fi
+
+#This function is called when there is some errors with mysql call or request
+function sendError()
+{
+    subj="☢ Mysql error! ${sessType} ${hostName}"
+    message="Some errors with mysql request!\nUser: ${PAM_USER} - `date '+%H:%M:%S %d.%m.%Y'` ${PAM_RHOST}"
+    curl  --header "Content-Type: application/json" --request "POST" --data "{\"chat_id\":\"${chat}\",\"text\":\"${subj}\n${message}\"}" "https://api.telegram.org/bot${token}/sendMessage"
+}
+
+#This functions execute actions with addr which exists in DB. So it is whitelisted.
+function loginKnown()
+{
+    #Using global variables from PAM_EXEC
+    global PAM_USER
+    global PAM_RHOST
+    global PAM_TYPE
+    #Getting comment for current IP to add to login message - usefull to understand who's coming.
+    Comment=`mysql -u${dbUser} -p${dbPass} -sN -e "use ${dbName};select Comment from tIPs where IP='${PAM_RHOST}'"`
+    if [ "$?" == "0" ]; then
+        #Selecting correct type of action and adding an icon to subject about
+        if [ "${PAM_TYPE}" == "open_session" ]; then
+    	sessType="🏄"
+            sessType+=" Login to "
+        fi
+        if [ "${PAM_TYPE}" == "close_session" ]; then
+            sessType="🏁"
+            sessType+=" Logout from "
+        fi
+        subj="${sessType} ${hostName}"
+        message="User: ${PAM_USER} - `date '+%H:%M:%S %d.%m.%Y'`\n${PAM_RHOST} ${Comment}"
+        curl  --header "Content-Type: application/json" --request "POST" --data "{\"chat_id\":\"${chat}\",\"text\":\"${subj}\n${message}\"}" "https://api.telegram.org/bot${token}/sendMessage"
+    else
+        #send error message to Telegram if any
+        sendError
+    fi
+}
+
+#This functions execute actions with addr which doesn't exists in DB. So it is unknown for us.
+function loginUnknown()
+{
+    #Using global variables from PAM_EXEC
+    global PAM_USER
+    global PAM_RHOST
+    global PAM_TYPE
+    #Trying to get info about country from whois
+    country=$(whois ${PAM_RHOST} | grep -i country | head -1)
+    if [ "$?" == "0" ]; then
+        #filtering, to prevent too large output
+        if [ ${#country} -gt 150 ]; then
+            country="Error!Country var. is too big"
+        fi
+    else
+        country="Error! Whois error. Country unknown."
+    fi
+    #Trying to get info about provider from whois
+    descr=$(whois ${PAM_RHOST} | grep -i descr)
+    if [ "$?" == "0" ]; then
+        #filtering, to prevent too large output
+        if [ ${#descr} -gt 150 ]; then
+            country="Error!Desription var. is too big"
+        fi
+    else
+        country="Error! Whois error. Desription unknown."
+    fi
+    if [ "${PAM_TYPE}" == "open_session" ]; then
+	sessType="👀"
+        sessType+=" Login from unconfirmed addr to "
+    fi
+    if [ "${PAM_TYPE}" == "close_session" ]; then
+        sessType="👀"
+        sessType+=" Logout from unconfirmed addr "
+    fi
+    subj="${sessType} ${hostName}"
+    message="User: ${PAM_USER} - `date '+%H:%M:%S %d.%m.%Y'`\nIP: ${PAM_RHOST}\n${country}\n${descr}"
+    curl  --header "Content-Type: application/json" --request "POST" --data "{\"chat_id\":\"${chat}\",\"text\":\"${subj}\n${message}\"}" "https://api.telegram.org/bot${token}/sendMessage"
+}
+
+#Main function. Making request to DB and routing the result to the procedure how to proceed the connection futher
+RES=$(mysql -u${dbUser} -p${dbPass} -sN -e "use ${dbName};select * from tIPs where IP='${PAM_RHOST}'")
+if [ "$?" == "0" ]; then
+    if [ "${RES}" == "" ]; then
+        #go to functions of unknown ip
+        loginUnknown
+    else
+        #go to functions of known ip
+        loginKnown
+    fi
+else
+    #send error messages if any
+    sendError
+fi
