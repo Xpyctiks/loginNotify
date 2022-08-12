@@ -23,3 +23,9 @@ Installation:
     tdbPass=""
 - Then dont't foreget to fill in $token and $chat variables in there. Telegram bot requires them very much.
 - Finally, add to the end of /etc/pam.d/sshd next string: "session optional pam_exec.so <path_to_this_script>/<this_script_name>"
+
+Adding IP address:
+- You can add new IP address with a comment using any mysql clients, cli, etc. Or use internal function of this script:
+  ./<this_script_name> addIP <IP> <Comment>
+  <IP> - an IP address to be added
+  <Comment> - comment for IP. Should be not large.

@@ -1,6 +1,6 @@
 #!/bin/env bash
 
-#LoginNotify v1.0 by Xpyct. https://github.com/Xpyctiks/loginNotify
+#LoginNotify v1.1 by Xpyct. https://github.com/Xpyctiks/loginNotify
 
 PATH=/bin:/usr/bin:/usr/sbin/:/usr/local/bin
 #token of your Telegram chat API
@@ -17,26 +17,18 @@ if [[ -s /etc/mailname ]]; then
 else
     hostName=`hostname`
 fi
-
-#Check do we have all variables setted up.
-if [[ -z ${dbName} || -z ${dbPass} || -z ${dbUser} || -z ${token} || -z ${chat} ]]; then
-  echo "One or more variables are not defined. Please check settings!"
-  exit 1
-fi
-
-#Check has it been launched from PAM or not. If not - break.
-if [[ -z ${PAM_RHOST} || -z ${PAM_TYPE} || -z ${PAM_USER} ]]; then
-  echo "Can't get PAM variables. Seems like the script launched no by PAM. Exiting."
-  exit 1
-fi
+Color_Off='\033[0m'
+Red='\033[0;31m'
+Green='\033[0;32m'
+Yellow='\033[0;33m'
 
 #This part used to init database before usage of the script
 #If the init function is called
 if [ "$1" == "initDB" ]; then
     #check do we have enough parameters,else show up a hint.
     if [ "$#" -lt 5 ]; then
-       echo -e "Usage: ./<this_script_name> initDB <mysql_root_pwd> <db_name> <db_user> <db_pwd>"
-	   echo -e "\t<mysql_root_pwd> - password of mysql root account to create everything we need. Type \"-\" if not need to use pwd for root access to mysql\n\t<db_name> - The name of DB you want to create\n\t<db_user> - user of the new DB\n\t<db_pwd> - password you want to set for new DB\n"
+       echo -e "${Yellow}Usage: ./<this_script_name> initDB ${Green}<mysql_root_pwd> <db_name> <db_user> <db_pwd>${Color_Off}"
+	   echo -e "\t${Green}<mysql_root_pwd>${Color_Off} - password of mysql root account to create everything we need. Type \"-\" if not need to use pwd for root access to mysql\n\t${Green}<db_name>${Color_Off} - The name of DB you want to create\n\t${Green}<db_user>${Color_Off} - user of the new DB\n\t${Green}<db_pwd>${Color_Off} - password you want to set for new DB\n"
        exit 1
     fi
     #decide what method of mysql auth should we use - with pwd or not
@@ -64,17 +56,61 @@ FLUSH PRIVILEGES;
 EOF
     #check if the previous actions were successfull
     if [ "$?" == "0" ]; then
-        echo "Database initialized successfully"
-        echo -e "Now you need to edit this script end set the next variables at the top of script to:"
-        echo -e "\tdbName=\"${3}\""
+        echo "${Green}Database initialized successfully${Color_Off}"
+        echo -e "${Yellow}Now you need to edit this script end set the next variables at the top of script to:${Color_Off}"
+        echo -e "${White}\tdbName=\"${3}\""
         echo -e "\tdbUser=\"${4}\""
-        echo -e "\tdbPass=\"${5}\""
-        echo -e "and finally: Add to the end of /etc/pam.d/sshd next string: \"session optional pam_exec.so <path_to_this_script>/<this_script_name>\""
+        echo -e "\tdbPass=\"${5}\"${Color_Off}"
+        echo -e "${Yellow}and finally: Add to the end of /etc/pam.d/sshd next string: \"session optional pam_exec.so <path_to_this_script>/<this_script_name>\"${Color_Off}"
         exit 0
     else
-        echo "DB is NOT initialized because of some errors - unable to connect/DB already exists/etc. Needs to be checked manually.\n"
+        echo -e "${Red}DB is NOT initialized because of some errors - unable to connect/DB already exists/etc. Needs to be checked manually.${Color_Off}"
         exit 1
     fi
+fi
+
+#This part for add ip to DB
+#If the add function is called
+if [ "$1" == "addIP" ]; then
+    #check do we have enough parameters,else show up a hint.
+    if [ ! "$#" -eq 3 ]; then
+       echo -e "${Yellow}Usage: ./<this_script_name> addIP ${Green}<IP> <Comment>${Color_Off}"
+       echo -e "\t${Green}<IP>${Color_Off} - IP address to be added\n\t${Green}<Comment>${Color_Off} - comment for IP. Should be not large."
+       exit 1
+    fi
+    if [ ${#2} -gt 15 ]; then
+        echo -e "${Red}Error! IP var. is too big${Color_Off}"
+        exit 1
+    fi
+    if [ ${#3} -gt 50 ]; then
+        echo -e "${Red}Error! Comment var. is too big${Color_Off}"
+        exit 1
+    fi
+#mysql function. shoudn't start with any tab.
+mysql -u${dbUser} -p${dbPass}<< EOF
+USE \`${dbName}\`;
+INSERT INTO \`tIPs\` (\`IP\`, \`Comment\`) VALUES ('${2}', '${3}');
+EOF
+    #check if the previous actions were successfull
+    if [ "$?" == "0" ]; then
+        echo -e "${Green}IP added successfully${Color_Off}"
+        exit 0
+    else
+        echo -e "${Red}IP is NOT add because of some errors - unable to connect/DB already exists/etc. Needs to be checked manually.${Color_Off}"
+        exit 1
+    fi
+fi
+
+#Check has it been launched from PAM or not. If not - break.
+if [[ -z ${PAM_RHOST} || -z ${PAM_TYPE} || -z ${PAM_USER} ]]; then
+  echo -e "${Red}Can't get PAM variables. Seems like the script launched no by PAM. Exiting.${Color_Off}"
+  exit 1
+fi
+
+#Check do we have all variables setted up.
+if [[ -z ${dbName} || -z ${dbPass} || -z ${dbUser} || -z ${token} || -z ${chat} ]]; then
+  echo -e "${Red}One or more variables are not defined. Please check settings!${Color_Off}"
+  exit 1
 fi
 
 #This function is called when there is some errors with mysql call or request
