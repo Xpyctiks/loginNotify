@@ -13,27 +13,27 @@ dbUser=""
 dbPass=""
 #Getting hostname.Try to get full FQDN from the mailname, if not - just get local hostname
 if [[ -s /etc/mailname ]]; then
-    hostName=`cat /etc/mailname`
+    hostName=$(cat /etc/mailname)
 else
-    hostName=`hostname`
+    hostName=$(hostname)
 fi
-Color_Off='\033[0m'
-Red='\033[0;31m'
-Green='\033[0;32m'
-Yellow='\033[0;33m'
+Color_Off='\033[[0m'
+Red='\033[[0;31m'
+Green='\033[[0;32m'
+Yellow='\033[[0;33m'
 
 #This part used to init database before usage of the script
 #If the init function is called
-if [ "$1" == "initDB" ]; then
+if [[ "${1}" == "initDB" ]]; then
     #check do we have enough parameters,else show up a hint.
-    if [ "$#" -lt 5 ]; then
+    if [[ "${#}" -lt 5 ]]; then
        echo -e "${Yellow}Usage: ./<this_script_name> initDB ${Green}<mysql_root_pwd> <db_name> <db_user> <db_pwd>${Color_Off}"
 	   echo -e "\t${Green}<mysql_root_pwd>${Color_Off} - password of mysql root account to create everything we need. Type \"-\" if not need to use pwd for root access to mysql\n\t${Green}<db_name>${Color_Off} - The name of DB you want to create\n\t${Green}<db_user>${Color_Off} - user of the new DB\n\t${Green}<db_pwd>${Color_Off} - password you want to set for new DB\n"
        exit 1
     fi
     #decide what method of mysql auth should we use - with pwd or not
     addition=""
-    if [ "$2" == "-" ]; then
+    if [[ "${2}" == "-" ]]; then
         addition="-uroot"
     else
         addition="-uroot -p${2}"
@@ -55,7 +55,7 @@ GRANT ALL ON ${3}.* to '${4}'@'localhost';
 FLUSH PRIVILEGES;
 EOF
     #check if the previous actions were successfull
-    if [ "$?" == "0" ]; then
+    if [[ "${?}" == "0" ]]; then
         echo "${Green}Database initialized successfully${Color_Off}"
         echo -e "${Yellow}Now you need to edit this script end set the next variables at the top of script to:${Color_Off}"
         echo -e "${White}\tdbName=\"${3}\""
@@ -71,18 +71,18 @@ fi
 
 #This part for add ip to DB
 #If the add function is called
-if [ "$1" == "addIP" ]; then
+if [[ "${1}" == "addIP" ]]; then
     #check do we have enough parameters,else show up a hint.
-    if [ ! "$#" -eq 3 ]; then
+    if [[ ! "${#}" -eq 3 ]]; then
        echo -e "${Yellow}Usage: ./<this_script_name> addIP ${Green}<IP> <Comment>${Color_Off}"
        echo -e "\t${Green}<IP>${Color_Off} - IP address to be added\n\t${Green}<Comment>${Color_Off} - comment for IP. Should be not large."
        exit 1
     fi
-    if [ ${#2} -gt 15 ]; then
+    if [[ ${#2} -gt 15 ]]; then
         echo -e "${Red}Error! IP var. is too big${Color_Off}"
         exit 1
     fi
-    if [ ${#3} -gt 50 ]; then
+    if [[ ${#3} -gt 50 ]]; then
         echo -e "${Red}Error! Comment var. is too big${Color_Off}"
         exit 1
     fi
@@ -92,7 +92,7 @@ USE \`${dbName}\`;
 INSERT INTO \`tIPs\` (\`IP\`, \`Comment\`) VALUES ('${2}', '${3}');
 EOF
     #check if the previous actions were successfull
-    if [ "$?" == "0" ]; then
+    if [[ "${?}" == "0" ]]; then
         echo -e "${Green}IP added successfully${Color_Off}"
         exit 0
     else
@@ -130,19 +130,19 @@ function loginKnown()
     global PAM_TYPE
     #Getting comment for current IP to add to login message - usefull to understand who's coming.
     Comment=`mysql -u${dbUser} -p${dbPass} -sN -e "use ${dbName};select Comment from tIPs where IP='${PAM_RHOST}'"`
-    if [ "$?" == "0" ]; then
+    if [[ "${?}" == "0" ]]; then
         #Selecting correct type of action and adding an icon to subject about
-        if [ "${PAM_TYPE}" == "open_session" ]; then
+        if [[ "${PAM_TYPE}" == "open_session" ]]; then
     	sessType="🏄"
             sessType+=" Login to "
         fi
-        if [ "${PAM_TYPE}" == "close_session" ]; then
+        if [[ "${PAM_TYPE}" == "close_session" ]]; then
             sessType="🏁"
             sessType+=" Logout from "
         fi
         subj="${sessType} ${hostName}"
         message="User: ${PAM_USER} - `date '+%H:%M:%S %d.%m.%Y'`\n${PAM_RHOST} ${Comment}"
-        curl  --header "Content-Type: application/json" --request "POST" --data "{\"chat_id\":\"${chat}\",\"text\":\"${subj}\n${message}\"}" "https://api.telegram.org/bot${token}/sendMessage"
+        curl  --header "Content-Type: application/json" --request "POST" --data "{\"chat_id\":\"${chat}\",\"text\":\"${subj}\n${message}\"}" "https://api.telegram.org/bot${token}/sendMessage" &
     else
         #send error message to Telegram if any
         sendError
@@ -158,9 +158,9 @@ function loginUnknown()
     global PAM_TYPE
     #Trying to get info about country from whois
     country=$(whois ${PAM_RHOST} | grep -i country | head -1)
-    if [ "$?" == "0" ]; then
+    if [[ "${?}" == "0" ]]; then
         #filtering, to prevent too large output
-        if [ ${#country} -gt 150 ]; then
+        if [[ ${#country} -gt 150 ]]; then
             country="Error!Country var. is too big"
         fi
     else
@@ -168,31 +168,31 @@ function loginUnknown()
     fi
     #Trying to get info about provider from whois
     descr=$(whois ${PAM_RHOST} | grep -i descr)
-    if [ "$?" == "0" ]; then
+    if [[ "${?}" == "0" ]]; then
         #filtering, to prevent too large output
-        if [ ${#descr} -gt 150 ]; then
+        if [[ ${#descr} -gt 150 ]]; then
             country="Error!Desription var. is too big"
         fi
     else
         country="Error! Whois error. Desription unknown."
     fi
-    if [ "${PAM_TYPE}" == "open_session" ]; then
+    if [[ "${PAM_TYPE}" == "open_session" ]]; then
 	sessType="👀"
         sessType+=" Login from unconfirmed addr to "
     fi
-    if [ "${PAM_TYPE}" == "close_session" ]; then
+    if [[ "${PAM_TYPE}" == "close_session" ]]; then
         sessType="👀"
         sessType+=" Logout from unconfirmed addr "
     fi
     subj="${sessType} ${hostName}"
     message="User: ${PAM_USER} - `date '+%H:%M:%S %d.%m.%Y'`\nIP: ${PAM_RHOST}\n${country}\n${descr}"
-    curl  --header "Content-Type: application/json" --request "POST" --data "{\"chat_id\":\"${chat}\",\"text\":\"${subj}\n${message}\"}" "https://api.telegram.org/bot${token}/sendMessage"
+    curl  --header "Content-Type: application/json" --request "POST" --data "{\"chat_id\":\"${chat}\",\"text\":\"${subj}\n${message}\"}" "https://api.telegram.org/bot${token}/sendMessage" &
 }
 
 #Main function. Making request to DB and routing the result to the procedure how to proceed the connection futher
 RES=$(mysql -u${dbUser} -p${dbPass} -sN -e "use ${dbName};select * from tIPs where IP='${PAM_RHOST}'")
-if [ "$?" == "0" ]; then
-    if [ "${RES}" == "" ]; then
+if [[ "${?}" == "0" ]]; then
+    if [[ "${RES}" == "" ]]; then
         #go to functions of unknown ip
         loginUnknown
     else
