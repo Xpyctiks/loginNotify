@@ -22,6 +22,23 @@ Red='\033[0;31m'
 Green='\033[0;32m'
 Yellow='\033[0;33m'
 
+#Shows up a help information
+if [[ "${1}" == "--help" || "${1}" == "help" || "${1}" == "-h" ]]; then
+    echo -e "${Yellow}Usage: ./<this_script_name> initDB ${Green}<mysql_root_pwd> <db_name> <db_user> <db_pwd>${Color_Off}"
+    echo -e "\t${Green}<mysql_root_pwd>${Color_Off} - password of mysql root account to create everything we need. Type \"-\" if not need to use pwd for root access to mysql\n\t${Green}<db_name>${Color_Off} - The name of DB you want to create\n\t${Green}<db_user>${Color_Off} - user of the new DB\n\t${Green}<db_pwd>${Color_Off} - password you want to set for new DB\n"
+    echo -e "\t${Yellow}./<this_script_name> addIP ${Green}<IP> <Comment>${Color_Off}"
+    echo -e "\t${Green}<IP>${Color_Off} - IP address to be added\n\t${Green}<Comment>${Color_Off} - comment for IP. Should be not large."
+    echo -e "\t${Yellow}U./<this_script_name> delIP ${Green}<IP>${Color_Off}"
+    echo -e "\t${Green}<IP>${Color_Off} - IP address to be removed\n${Color_Off}"
+    exit 0
+fi
+
+#Check do we have all variables setted up.
+if [[ -z ${dbName} || -z ${dbPass} || -z ${dbUser} || -z ${token} || -z ${chat} ]]; then
+  echo -e "${Red}One or more variables are not defined. Please check settings!${Color_Off}"
+  exit 1
+fi
+
 #This part used to init database before usage of the script
 #If the init function is called
 if [[ "${1}" == "initDB" ]]; then
@@ -61,7 +78,7 @@ EOF
         echo -e "${White}\tdbName=\"${3}\""
         echo -e "\tdbUser=\"${4}\""
         echo -e "\tdbPass=\"${5}\"${Color_Off}"
-        echo -e "${Yellow}and finally: Add to the end of /etc/pam.d/sshd next string: \"session optional pam_exec.so <path_to_this_script>/<this_script_name>\"${Color_Off}"
+        echo -e "${Yellow}and finally: Add to the end of /etc/pam.d/sshd next string: \"session optional pam_exec.so $(pwd)/$(basename ${0})\"${Color_Off}"
         exit 0
     else
         echo -e "${Red}DB is NOT initialized because of some errors - unable to connect/DB already exists/etc. Needs to be checked manually.${Color_Off}"
@@ -96,7 +113,35 @@ EOF
         echo -e "${Green}IP added successfully${Color_Off}"
         exit 0
     else
-        echo -e "${Red}IP is NOT add because of some errors - unable to connect/DB already exists/etc. Needs to be checked manually.${Color_Off}"
+        echo -e "${Red}IP is NOT add because of some errors - unable to connect/IP already exists/etc. Needs to be checked manually.${Color_Off}"
+        exit 1
+    fi
+fi
+
+#This part for delete ip to DB
+#If the delete function is called
+if [[ "${1}" == "delIP" ]]; then
+    #check do we have enough parameters,else show up a hint.
+    if [[ ! "${#}" -eq 2 ]]; then
+       echo -e "${Yellow}Usage: ./<this_script_name> delIP ${Green}<IP>${Color_Off}"
+       echo -e "\t${Green}<IP>${Color_Off} - IP address to be removed\n${Color_Off}"
+       exit 1
+    fi
+    if [[ ${#2} -gt 15 ]]; then
+        echo -e "${Red}Error! IP var. is too big${Color_Off}"
+        exit 1
+    fi
+#mysql function. shoudn't start with any tab.
+mysql -u${dbUser} -p${dbPass}<< EOF
+USE \`${dbName}\`;
+DELETE FROM \`tIPs\` WHERE IP='${2}';
+EOF
+    #check if the previous actions were successfull
+    if [[ "${?}" == "0" ]]; then
+        echo -e "${Green}IP removed successfully${Color_Off}"
+        exit 0
+    else
+        echo -e "${Red}IP is NOT removed because of some errors - unable to connect/already deleted/etc. Needs to be checked manually.${Color_Off}"
         exit 1
     fi
 fi
@@ -104,12 +149,7 @@ fi
 #Check has it been launched from PAM or not. If not - break.
 if [[ -z ${PAM_RHOST} || -z ${PAM_TYPE} || -z ${PAM_USER} ]]; then
   echo -e "${Red}Can't get PAM variables. Seems like the script launched no by PAM. Exiting.${Color_Off}"
-  exit 1
-fi
-
-#Check do we have all variables setted up.
-if [[ -z ${dbName} || -z ${dbPass} || -z ${dbUser} || -z ${token} || -z ${chat} ]]; then
-  echo -e "${Red}One or more variables are not defined. Please check settings!${Color_Off}"
+  echo -e "${Yellow}Use --help parameter to get help information.${Color_Off}"
   exit 1
 fi
 
