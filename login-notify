@@ -13,6 +13,8 @@ sessType=""
 confFile="./login-notify.local"
 #Error-log file.It is created if script has some errors during launch
 errLog="/tmp/login-notify.errors"
+#logger check
+loggerInstalled=""
 #Variables for db connect.Will be filled in from settings file.
 dbName=""
 dbUser=""
@@ -30,6 +32,8 @@ Color_Off='\033[0m'
 Red='\033[0;31m'
 Green='\033[0;32m'
 Yellow='\033[0;33m'
+#Tag for Syslog usage
+Tag="LOGIN-NOTIFY"
 
 #Head to the current directory of the script it has been launched from. Check if we are launched from symlink or any other place as subshell process.
 echo "${0}" | egrep -e '^\..*' > /dev/null 2>&1
@@ -47,10 +51,26 @@ else
   cd "${scriptPath}"
 fi
 
+logger -V > /dev/null 2>&1
+if [[ "${?}" != "127" ]]; then
+  loggerInstalled="1"
+fi
+
+#Log errors to Syslog
+function logError()
+{
+  if [[ "${loggerInstalled}" == "1" ]]; then
+    if ! [[ -z "${1}" ]]; then
+    logger -t "${Tag}" "${1}"
+    fi
+  fi
+}
+
 #check config file.Get values from it if it is found, or creating new one if it is not.
 if ! [[ -f "${confFile}" ]]; then
   if [[ "${launchFrom}" == "shell" ]]; then
 	  echo -e "${Yellow}Warning! ${confFile} with all important settings is not found and it was created. Please, fill in the file and then this program will works!${Color_Off}"
+    logError "Warning! ${confFile} with all important settings is not found and it was created. Please, fill in the file and then this program will works!"
 	  cat << EOF > "${confFile}"
 #User for access to DB for write logs.
 dbUser="LoginNotify"
@@ -70,7 +90,7 @@ telegramChat=""
 EOF
 	  exit 1
   elif [[ "${launchFrom}" == "cron" ]]; then
-    echo -e "Error! No ${confFile} in current directory $(pwd). Launch this script from shell to create default config file. " >> "${errLog}"
+    logError "Error! No ${confFile} in current directory $(pwd). Launch this script from shell to create default config file."
     exit 1
   fi
 else
@@ -81,10 +101,12 @@ else
     if [[ "${launchFrom}" == "shell" ]]; then  
       echo -e "${Red}Error! Some important variables in ${confFile} are empty!${Color_Off}"
       echo -e "${Yellow}dbUser=${dbUser}\ndbPass=${dbPass}\ndbName=${dbName}\ntelegramToken=${telegramToken}\ntelegramChat=${telegramChat}${Color_Off}"
+      logError "Error! Some important variables in ${confFile} are empty!"
+      logError "dbUser=${dbUser};dbPass=${dbPass};dbName=${dbName};telegramToken=${telegramToken};telegramChat=${telegramChat}"
       exit 1
     elif [[ "${launchFrom}" == "cron" ]]; then
-      echo -e "Error! Some important variables in ${confFile} are empty!" >> "${errLog}"
-      echo -e "dbUser=${dbUser}\ndbPass=${dbPass}\ndbName=${dbName}\ntelegramToken=${telegramToken}\ntelegramChat=${telegramChat}" >> "${errLog}"
+      logError "Error! Some important variables in ${confFile} are empty!"
+      logError "dbUser=${dbUser};dbPass=${dbPass};dbName=${dbName};telegramToken=${telegramToken};telegramChat=${telegramChat}"
       exit 1
     fi
   fi
@@ -95,9 +117,10 @@ curl > /dev/null 2>&1
 if [[ "${?}" == "127" ]]; then
   if [[ "${launchFrom}" == "shell" ]]; then
     echo -e "${Red}Error! Curl is not installed! Can't send message to Telegram${Color_Off}"
+    logError "Error! Curl is not installed! Can't send message to Telegram"
     exit 1
   elif [[ "${launchFrom}" == "cron" ]]; then
-    echo -e "Error! Curl is not installed! Can't send message to Telegram" >> "${errLog}"
+    logError "Error! Curl is not installed! Can't send message to Telegram"
     exit 1
   fi
 fi
@@ -225,8 +248,11 @@ if [[ -z ${PAM_RHOST} || -z ${PAM_TYPE} || -z ${PAM_USER} ]]; then
   if [[ "${launchFrom}" == "shell" ]]; then
     echo -e "${Red}Can't get PAM variables. Seems like the script launched no by PAM. Exiting.${Color_Off}"
     echo -e "${Yellow}Use --help parameter to get help information.${Color_Off}"
+    errLog "Can't get PAM variables. Seems like the script launched no by PAM. Exiting..."
+    errLog "RHOST=${PAM_RHOST};TYPE=${PAM_TYPE};USER=${PAM_USER}"
   elif [[ "${launchFrom}" == "cron" ]]; then
-    echo -e "Can't get PAM variables. Seems like the script launched no by PAM. Exiting..." >> "${errLog}"
+    errLog "Can't get PAM variables. Seems like the script launched no by PAM. Exiting..."
+    errLog "RHOST=${PAM_RHOST};TYPE=${PAM_TYPE};USER=${PAM_USER}"
   fi
   exit 1
 fi
@@ -237,6 +263,7 @@ function sendError()
   subj="☢ Mysql error! ${sessType} ${hostName}"
   message="Some errors with mysql request!\nUser: ${PAM_USER} - `date '+%H:%M:%S %d.%m.%Y'` ${PAM_RHOST}"
   curl  --header "Content-Type: application/json" --request "POST" --data "{\"chat_id\":\"${chat}\",\"text\":\"${subj}\n${message}\"}" "https://api.telegram.org/bot${token}/sendMessage"
+  errLog "${message}"
 }
 
 #This functions execute actions with addr which exists in DB. So it is whitelisted.
