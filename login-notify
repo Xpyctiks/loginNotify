@@ -1,6 +1,7 @@
 #!/bin/env bash
 
-#LoginNotify v1.1 by Xpyct. https://github.com/Xpyctiks/loginNotify
+#LoginNotify v1.2 by Xpyct. https://github.com/Xpyctiks/loginNotify
+#release 1.2.000
 
 PATH=/bin:/usr/bin:/usr/sbin/:/usr/local/bin
 #token of your Telegram chat API
@@ -8,55 +9,128 @@ token=""
 #ChatID of Telegram chat you want send to
 chat=""
 sessType=""
+#Name of settings file.
+confFile="./login-notify.local"
+#Error-log file.It is created if script has some errors during launch
+errLog="/tmp/login-notify.errors"
+#Variables for db connect.Will be filled in from settings file.
 dbName=""
 dbUser=""
 dbPass=""
 #Getting hostname.Try to get full FQDN from the mailname, if not - just get local hostname
 if [[ -s /etc/mailname ]]; then
-    hostName=$(cat /etc/mailname)
+    hostName="$(cat /etc/mailname)"
 else
-    hostName=$(hostname)
+    hostName="$(hostname)"
 fi
+#Variable for keep launch env. in
+launchFrom=""
+#Colors
 Color_Off='\033[0m'
 Red='\033[0;31m'
 Green='\033[0;32m'
 Yellow='\033[0;33m'
 
-#Shows up a help information
-if [[ "${1}" == "--help" || "${1}" == "help" || "${1}" == "-h" ]]; then
-    echo -e "${Yellow}Usage: ./<this_script_name> initDB ${Green}<mysql_root_pwd> <db_name> <db_user> <db_pwd>${Color_Off}"
-    echo -e "\t${Green}<mysql_root_pwd>${Color_Off} - password of mysql root account to create everything we need. Type \"-\" if not need to use pwd for root access to mysql\n\t${Green}<db_name>${Color_Off} - The name of DB you want to create\n\t${Green}<db_user>${Color_Off} - user of the new DB\n\t${Green}<db_pwd>${Color_Off} - password you want to set for new DB\n"
-    echo -e "\t${Yellow}./<this_script_name> addIP ${Green}<IP> <Comment>${Color_Off}"
-    echo -e "\t${Green}<IP>${Color_Off} - IP address to be added\n\t${Green}<Comment>${Color_Off} - comment for IP. Should be not large."
-    echo -e "\t${Yellow}U./<this_script_name> delIP ${Green}<IP>${Color_Off}"
-    echo -e "\t${Green}<IP>${Color_Off} - IP address to be removed\n${Color_Off}"
-    exit 0
+#Head to the current directory of the script it has been launched from. Check if we are launched from symlink or any other place as subshell process.
+echo "${0}" | egrep -e '^\..*' > /dev/null 2>&1
+if [[ "${?}" == "0" ]]; then
+  #the script is launched from shell manually
+  scriptName=$(echo "${0}" | sed 's/.//')
+  scriptPath=$(realpath -e ${0} | sed "s/\\${scriptName}//")
+  launchFrom="shell"
+  cd "${scriptPath}"
+else
+  #the script is launched from cron or any parent process
+  scriptName="$(basename "${0}")"
+  scriptPath="$(echo "${0}" | sed "s/${scriptName}//")"
+  launchFrom="cron"
+  cd "${scriptPath}"
 fi
 
-#Check do we have all variables setted up.
-if [[ -z ${dbName} || -z ${dbPass} || -z ${dbUser} || -z ${token} || -z ${chat} ]]; then
-  echo -e "${Red}One or more variables are not defined. Please check settings!${Color_Off}"
-  exit 1
+#check config file.Get values from it if it is found, or creating new one if it is not.
+if ! [[ -f "${confFile}" ]]; then
+  if [[ "${launchFrom}" == "shell" ]]; then
+	  echo -e "${Yellow}Warning! ${confFile} with all important settings is not found and it was created. Please, fill in the file and then this program will works!${Color_Off}"
+	  cat << EOF > "${confFile}"
+#User for access to DB for write logs.
+dbUser="LoginNotify"
+
+#Password for access to DB for write logs.
+dbPass=""
+
+#DB name.If empty - will not use mysql at all for logging.See README
+dbName="LoginNotify"
+
+#Telegram api token. Looks like 123456789:abcdefghigklmnopqrstuvwxyz
+telegramToken=""
+
+#Telegram chat_id. 9 digits usually.
+telegramChat=""
+
+EOF
+	  exit 1
+  elif [[ "${launchFrom}" == "cron" ]]; then
+    echo -e "Error! No ${confFile} in current directory $(pwd). Launch this script from shell to create default config file. " >> "${errLog}"
+    exit 1
+  fi
+else
+  #getting all necessary variables from external file
+  source "${confFile}"
+  #checking all variables are set. No empty one.
+  if [[ -z "${dbUser}" ]] || [[ -z "${dbPass}" ]] || [[ -z "${dbName}" ]] || [[ -z "${telegramChat}" ]] || [[ -z "${telegramToken}" ]]; then
+    if [[ "${launchFrom}" == "shell" ]]; then  
+      echo -e "${Red}Error! Some important variables in ${confFile} are empty!${Color_Off}"
+      echo -e "${Yellow}dbUser=${dbUser}\ndbPass=${dbPass}\ndbName=${dbName}\ntelegramToken=${telegramToken}\ntelegramChat=${telegramChat}${Color_Off}"
+      exit 1
+    elif [[ "${launchFrom}" == "cron" ]]; then
+      echo -e "Error! Some important variables in ${confFile} are empty!" >> "${errLog}"
+      echo -e "dbUser=${dbUser}\ndbPass=${dbPass}\ndbName=${dbName}\ntelegramToken=${telegramToken}\ntelegramChat=${telegramChat}" >> "${errLog}"
+      exit 1
+    fi
+  fi
+fi
+
+#Test does CURL is installed.If not, this script doesn't has sense
+curl > /dev/null 2>&1
+if [[ "${?}" == "127" ]]; then
+  if [[ "${launchFrom}" == "shell" ]]; then
+    echo -e "${Red}Error! Curl is not installed! Can't send message to Telegram${Color_Off}"
+    exit 1
+  elif [[ "${launchFrom}" == "cron" ]]; then
+    echo -e "Error! Curl is not installed! Can't send message to Telegram" >> "${errLog}"
+    exit 1
+  fi
+fi
+
+#Shows up a help information
+if [[ "${1}" == "--help" || "${1}" == "help" || "${1}" == "-h" ]]; then
+  echo -e "${Yellow}Usage: ./<this_script_name> initDB ${Green}<mysql_root_pwd> <db_name> <db_user> <db_pwd>${Color_Off}"
+  echo -e "\t${Green}<mysql_root_pwd>${Color_Off} - password of mysql root account to create everything we need. Type \"-\" if not need to use pwd for root access to mysql\n\t${Green}<db_name>${Color_Off} - The name of DB you want to create\n\t${Green}<db_user>${Color_Off} - user of the new DB\n\t${Green}<db_pwd>${Color_Off} - password you want to set for new DB\n"
+  echo -e "\t${Yellow}./<this_script_name> addIP ${Green}<IP> <Comment>${Color_Off}"
+  echo -e "\t${Green}<IP>${Color_Off} - IP address to be added\n\t${Green}<Comment>${Color_Off} - comment for IP. Should be not large."
+  echo -e "\t${Yellow}U./<this_script_name> delIP ${Green}<IP>${Color_Off}"
+  echo -e "\t${Green}<IP>${Color_Off} - IP address to be removed\n${Color_Off}"
+  exit 0
 fi
 
 #This part used to init database before usage of the script
 #If the init function is called
 if [[ "${1}" == "initDB" ]]; then
-    #check do we have enough parameters,else show up a hint.
-    if [[ "${#}" -lt 5 ]]; then
-       echo -e "${Yellow}Usage: ./<this_script_name> initDB ${Green}<mysql_root_pwd> <db_name> <db_user> <db_pwd>${Color_Off}"
-	   echo -e "\t${Green}<mysql_root_pwd>${Color_Off} - password of mysql root account to create everything we need. Type \"-\" if not need to use pwd for root access to mysql\n\t${Green}<db_name>${Color_Off} - The name of DB you want to create\n\t${Green}<db_user>${Color_Off} - user of the new DB\n\t${Green}<db_pwd>${Color_Off} - password you want to set for new DB\n"
-       exit 1
-    fi
-    #decide what method of mysql auth should we use - with pwd or not
-    addition=""
-    if [[ "${2}" == "-" ]]; then
-        addition="-uroot"
-    else
-        addition="-uroot -p${2}"
-    fi
+  #check do we have enough parameters,else show up a hint.
+  if [[ "${#}" -lt 5 ]]; then
+    echo -e "${Yellow}Usage: ./<this_script_name> initDB ${Green}<mysql_root_pwd> <db_name> <db_user> <db_pwd>${Color_Off}"
+    echo -e "\t${Green}<mysql_root_pwd>${Color_Off} - password of mysql root account to create everything we need. Type \"-\" if not need to use pwd for root access to mysql\n\t${Green}<db_name>${Color_Off} - The name of DB you want to create\n\t${Green}<db_user>${Color_Off} - user of the new DB\n\t${Green}<db_pwd>${Color_Off} - password you want to set for new DB\n"
+    exit 1
+  fi
+  #decide what method of mysql auth should we use - with pwd or not
+  addition=""
+  if [[ "${2}" == "-" ]]; then
+    addition="-uroot"
+  else
+    addition="-uroot -p${2}"
+  fi
 #main function. shoudn't start with any tab.
-mysql ${addition} << EOF
+mysql "${addition}" << EOF
 CREATE DATABASE \`${3}\` DEFAULT CHARACTER SET utf8 COLLATE utf8_bin;
 USE \`${3}\`;
 CREATE TABLE \`tIPs\` (
@@ -68,178 +142,182 @@ CREATE TABLE \`tIPs\` (
 ALTER TABLE \`tIPs\` ADD PRIMARY KEY (\`Id\`), ADD UNIQUE KEY \`IP\` (\`IP\`);
 ALTER TABLE \`tIPs\` MODIFY \`Id\` int(10) UNSIGNED NOT NULL AUTO_INCREMENT, AUTO_INCREMENT=1;
 CREATE USER '${4}'@'%' IDENTIFIED BY '${5}';
-GRANT ALL ON ${3}.* to '${4}'@'localhost';
+GRANT ALL ON ${3}.* to '${4}'@'%';
 FLUSH PRIVILEGES;
 EOF
-    #check if the previous actions were successfull
-    if [[ "${?}" == "0" ]]; then
-        echo "${Green}Database initialized successfully${Color_Off}"
-        echo -e "${Yellow}Now you need to edit this script end set the next variables at the top of script to:${Color_Off}"
-        echo -e "${White}\tdbName=\"${3}\""
-        echo -e "\tdbUser=\"${4}\""
-        echo -e "\tdbPass=\"${5}\"${Color_Off}"
-        echo -e "${Yellow}and finally: Add to the end of /etc/pam.d/sshd next string: \"session optional pam_exec.so $(pwd)/$(basename ${0})\"${Color_Off}"
-        exit 0
-    else
-        echo -e "${Red}DB is NOT initialized because of some errors - unable to connect/DB already exists/etc. Needs to be checked manually.${Color_Off}"
-        exit 1
-    fi
+  #check if the previous actions were successfull
+  if [[ "${?}" == "0" ]]; then
+    echo -e "${Green}Database initialized successfully${Color_Off}"
+    echo -e "${Yellow}Now you need to edit this script end set the next variables at the top of script to:${Color_Off}"
+    echo -e "${White}\tdbName=\"${3}\""
+    echo -e "\tdbUser=\"${4}\""
+    echo -e "\tdbPass=\"${5}\"${Color_Off}"
+    echo -e "${Yellow}and finally: Add to the end of /etc/pam.d/sshd next string: \"session optional pam_exec.so $(pwd)/$(basename ${0})\"${Color_Off}"
+    exit 0
+  else
+    echo -e "${Red}DB is NOT initialized because of some errors - unable to connect/DB already exists/etc. Needs to be checked manually.${Color_Off}"
+    exit 1
+  fi
 fi
 
 #This part for add ip to DB
 #If the add function is called
 if [[ "${1}" == "addIP" ]]; then
-    #check do we have enough parameters,else show up a hint.
-    if [[ ! "${#}" -eq 3 ]]; then
-       echo -e "${Yellow}Usage: ./<this_script_name> addIP ${Green}<IP> <Comment>${Color_Off}"
-       echo -e "\t${Green}<IP>${Color_Off} - IP address to be added\n\t${Green}<Comment>${Color_Off} - comment for IP. Should be not large."
-       exit 1
-    fi
-    if [[ ${#2} -gt 15 ]]; then
-        echo -e "${Red}Error! IP var. is too big${Color_Off}"
-        exit 1
-    fi
-    if [[ ${#3} -gt 50 ]]; then
-        echo -e "${Red}Error! Comment var. is too big${Color_Off}"
-        exit 1
-    fi
+  #check do we have enough parameters,else show up a hint.
+  if [[ ! "${#}" -eq 3 ]]; then
+    echo -e "${Yellow}Usage: ./<this_script_name> addIP ${Green}<IP> <Comment>${Color_Off}"
+    echo -e "\t${Green}<IP>${Color_Off} - IP address to be added\n\t${Green}<Comment>${Color_Off} - comment for IP. Should be not large."
+    exit 1
+  fi
+  if [[ ${#2} -gt 15 ]]; then
+    echo -e "${Red}Error! IP var. is too big${Color_Off}"
+    exit 1
+  fi
+  if [[ ${#3} -gt 50 ]]; then
+    echo -e "${Red}Error! Comment var. is too big${Color_Off}"
+    exit 1
+  fi
 #mysql function. shoudn't start with any tab.
-mysql -u${dbUser} -p${dbPass}<< EOF
+mysql -u"${dbUser}" -p"${dbPass}" << EOF
 USE \`${dbName}\`;
 INSERT INTO \`tIPs\` (\`IP\`, \`Comment\`) VALUES ('${2}', '${3}');
 EOF
-    #check if the previous actions were successfull
-    if [[ "${?}" == "0" ]]; then
-        echo -e "${Green}IP added successfully${Color_Off}"
-        exit 0
-    else
-        echo -e "${Red}IP is NOT add because of some errors - unable to connect/IP already exists/etc. Needs to be checked manually.${Color_Off}"
-        exit 1
-    fi
+  #check if the previous actions were successfull
+  if [[ "${?}" == "0" ]]; then
+    echo -e "${Green}IP added successfully${Color_Off}"
+    exit 0
+  else
+    echo -e "${Red}IP is NOT add because of some errors - unable to connect/IP already exists/etc. Needs to be checked manually.${Color_Off}"
+    exit 1
+  fi
 fi
 
 #This part for delete ip to DB
 #If the delete function is called
 if [[ "${1}" == "delIP" ]]; then
-    #check do we have enough parameters,else show up a hint.
-    if [[ ! "${#}" -eq 2 ]]; then
-       echo -e "${Yellow}Usage: ./<this_script_name> delIP ${Green}<IP>${Color_Off}"
-       echo -e "\t${Green}<IP>${Color_Off} - IP address to be removed\n${Color_Off}"
-       exit 1
-    fi
-    if [[ ${#2} -gt 15 ]]; then
-        echo -e "${Red}Error! IP var. is too big${Color_Off}"
-        exit 1
-    fi
+  #check do we have enough parameters,else show up a hint.
+  if [[ ! "${#}" -eq 2 ]]; then
+    echo -e "${Yellow}Usage: ./<this_script_name> delIP ${Green}<IP>${Color_Off}"
+    echo -e "\t${Green}<IP>${Color_Off} - IP address to be removed\n${Color_Off}"
+    exit 1
+  fi
+  if [[ ${#2} -gt 15 ]]; then
+    echo -e "${Red}Error! IP var. is too big${Color_Off}"
+    exit 1
+  fi
 #mysql function. shoudn't start with any tab.
-mysql -u${dbUser} -p${dbPass}<< EOF
+mysql -u"${dbUser}" -p"${dbPass}" << EOF
 USE \`${dbName}\`;
 DELETE FROM \`tIPs\` WHERE IP='${2}';
 EOF
-    #check if the previous actions were successfull
-    if [[ "${?}" == "0" ]]; then
-        echo -e "${Green}IP removed successfully${Color_Off}"
-        exit 0
-    else
-        echo -e "${Red}IP is NOT removed because of some errors - unable to connect/already deleted/etc. Needs to be checked manually.${Color_Off}"
-        exit 1
-    fi
+  #check if the previous actions were successfull
+  if [[ "${?}" == "0" ]]; then
+    echo -e "${Green}IP removed successfully${Color_Off}"
+    exit 0
+  else
+    echo -e "${Red}IP is NOT removed because of some errors - unable to connect/already deleted/etc. Needs to be checked manually.${Color_Off}"
+    exit 1
+  fi
 fi
 
 #Check has it been launched from PAM or not. If not - break.
 if [[ -z ${PAM_RHOST} || -z ${PAM_TYPE} || -z ${PAM_USER} ]]; then
-  echo -e "${Red}Can't get PAM variables. Seems like the script launched no by PAM. Exiting.${Color_Off}"
-  echo -e "${Yellow}Use --help parameter to get help information.${Color_Off}"
+  if [[ "${launchFrom}" == "shell" ]]; then
+    echo -e "${Red}Can't get PAM variables. Seems like the script launched no by PAM. Exiting.${Color_Off}"
+    echo -e "${Yellow}Use --help parameter to get help information.${Color_Off}"
+  elif [[ "${launchFrom}" == "cron" ]]; then
+    echo -e "Can't get PAM variables. Seems like the script launched no by PAM. Exiting..." >> "${errLog}"
+  fi
   exit 1
 fi
 
 #This function is called when there is some errors with mysql call or request
 function sendError()
 {
-    subj="☢ Mysql error! ${sessType} ${hostName}"
-    message="Some errors with mysql request!\nUser: ${PAM_USER} - `date '+%H:%M:%S %d.%m.%Y'` ${PAM_RHOST}"
-    curl  --header "Content-Type: application/json" --request "POST" --data "{\"chat_id\":\"${chat}\",\"text\":\"${subj}\n${message}\"}" "https://api.telegram.org/bot${token}/sendMessage"
+  subj="☢ Mysql error! ${sessType} ${hostName}"
+  message="Some errors with mysql request!\nUser: ${PAM_USER} - `date '+%H:%M:%S %d.%m.%Y'` ${PAM_RHOST}"
+  curl  --header "Content-Type: application/json" --request "POST" --data "{\"chat_id\":\"${chat}\",\"text\":\"${subj}\n${message}\"}" "https://api.telegram.org/bot${token}/sendMessage"
 }
 
 #This functions execute actions with addr which exists in DB. So it is whitelisted.
 function loginKnown()
 {
-    #Using global variables from PAM_EXEC
-    global PAM_USER
-    global PAM_RHOST
-    global PAM_TYPE
-    #Getting comment for current IP to add to login message - usefull to understand who's coming.
-    Comment=`mysql -u${dbUser} -p${dbPass} -sN -e "use ${dbName};select Comment from tIPs where IP='${PAM_RHOST}'"`
-    if [[ "${?}" == "0" ]]; then
-        #Selecting correct type of action and adding an icon to subject about
-        if [[ "${PAM_TYPE}" == "open_session" ]]; then
-    	sessType="🏄"
-            sessType+=" Login to "
-        fi
-        if [[ "${PAM_TYPE}" == "close_session" ]]; then
-            sessType="🏁"
-            sessType+=" Logout from "
-        fi
-        subj="${sessType} ${hostName}"
-        message="User: ${PAM_USER} - `date '+%H:%M:%S %d.%m.%Y'`\n${PAM_RHOST} ${Comment}"
-        curl  --header "Content-Type: application/json" --request "POST" --data "{\"chat_id\":\"${chat}\",\"text\":\"${subj}\n${message}\"}" "https://api.telegram.org/bot${token}/sendMessage" &
-    else
-        #send error message to Telegram if any
-        sendError
+  #Using global variables from PAM_EXEC
+  global PAM_USER
+  global PAM_RHOST
+  global PAM_TYPE
+  #Getting comment for current IP to add to login message - usefull to understand who's coming.
+  Comment=`mysql -u"${dbUser}" -p"${dbPass}" -sN -e "use ${dbName};select Comment from tIPs where IP='${PAM_RHOST}'"`
+  if [[ "${?}" == "0" ]]; then
+    #Selecting correct type of action and adding an icon to subject about
+    if [[ "${PAM_TYPE}" == "open_session" ]]; then
+      sessType="🏄"
+      sessType+=" Login to "
     fi
+    if [[ "${PAM_TYPE}" == "close_session" ]]; then
+        sessType="🏁"
+        sessType+=" Logout from "
+    fi
+    subj="${sessType} ${hostName}"
+    message="User: ${PAM_USER} - `date '+%H:%M:%S %d.%m.%Y'`\n${PAM_RHOST} ${Comment}"
+    curl  --header "Content-Type: application/json" --request "POST" --data "{\"chat_id\":\"${chat}\",\"text\":\"${subj}\n${message}\"}" "https://api.telegram.org/bot${token}/sendMessage" & > /dev/null 2>&1
+  else
+    #send error message to Telegram if any
+    sendError
+  fi
 }
 
 #This functions execute actions with addr which doesn't exists in DB. So it is unknown for us.
 function loginUnknown()
 {
-    #Using global variables from PAM_EXEC
-    global PAM_USER
-    global PAM_RHOST
-    global PAM_TYPE
-    #Trying to get info about country from whois
-    country=$(whois ${PAM_RHOST} | grep -i country | head -1)
-    if [[ "${?}" == "0" ]]; then
-        #filtering, to prevent too large output
-        if [[ ${#country} -gt 150 ]]; then
-            country="Error!Country var. is too big"
-        fi
-    else
-        country="Error! Whois error. Country unknown."
+  #Using global variables from PAM_EXEC
+  global PAM_USER
+  global PAM_RHOST
+  global PAM_TYPE
+  #Trying to get info about country from whois
+  country=$(whois ${PAM_RHOST} | grep -i country | head -1)
+  if [[ "${?}" == "0" ]]; then
+    #filtering, to prevent too large output
+    if [[ ${#country} -gt 150 ]]; then
+      country="Error!Country var. is too big"
     fi
-    #Trying to get info about provider from whois
-    descr=$(whois ${PAM_RHOST} | grep -i descr)
-    if [[ "${?}" == "0" ]]; then
-        #filtering, to prevent too large output
-        if [[ ${#descr} -gt 150 ]]; then
-            country="Error!Desription var. is too big"
-        fi
-    else
-        country="Error! Whois error. Desription unknown."
+  else
+    country="Error! Whois error. Country unknown."
+  fi
+  #Trying to get info about provider from whois
+  descr=$(whois ${PAM_RHOST} | grep -i descr)
+  if [[ "${?}" == "0" ]]; then
+    #filtering, to prevent too large output
+    if [[ ${#descr} -gt 150 ]]; then
+        country="Error!Desription var. is too big"
     fi
-    if [[ "${PAM_TYPE}" == "open_session" ]]; then
-	sessType="👀"
-        sessType+=" Login from unconfirmed addr to "
-    fi
-    if [[ "${PAM_TYPE}" == "close_session" ]]; then
-        sessType="👀"
-        sessType+=" Logout from unconfirmed addr "
-    fi
-    subj="${sessType} ${hostName}"
-    message="User: ${PAM_USER} - `date '+%H:%M:%S %d.%m.%Y'`\nIP: ${PAM_RHOST}\n${country}\n${descr}"
-    curl  --header "Content-Type: application/json" --request "POST" --data "{\"chat_id\":\"${chat}\",\"text\":\"${subj}\n${message}\"}" "https://api.telegram.org/bot${token}/sendMessage" &
+  else
+    country="Error! Whois error. Desription unknown."
+  fi
+  if [[ "${PAM_TYPE}" == "open_session" ]]; then
+    sessType="👀"
+    sessType+=" Login from unconfirmed addr to "
+  fi
+  if [[ "${PAM_TYPE}" == "close_session" ]]; then
+    sessType="👀"
+    sessType+=" Logout from unconfirmed addr "
+  fi
+  subj="${sessType} ${hostName}"
+  message="User: ${PAM_USER} - `date '+%H:%M:%S %d.%m.%Y'`\nIP: ${PAM_RHOST}\n${country}\n${descr}"
+  curl  --header "Content-Type: application/json" --request "POST" --data "{\"chat_id\":\"${chat}\",\"text\":\"${subj}\n${message}\"}" "https://api.telegram.org/bot${token}/sendMessage" & > /dev/null 2>&1
 }
 
 #Main function. Making request to DB and routing the result to the procedure how to proceed the connection futher
-RES=$(mysql -u${dbUser} -p${dbPass} -sN -e "use ${dbName};select * from tIPs where IP='${PAM_RHOST}'")
+RES=$(mysql -u$"{dbUser}" -p"${dbPass}" -sN -e "use ${dbName};select * from tIPs where IP='${PAM_RHOST}'")
 if [[ "${?}" == "0" ]]; then
-    if [[ "${RES}" == "" ]]; then
-        #go to functions of unknown ip
-        loginUnknown
-    else
-        #go to functions of known ip
-        loginKnown
-    fi
+  if [[ "${RES}" == "" ]]; then
+    #go to functions of unknown ip
+    loginUnknown
+  else
+    #go to functions of known ip
+    loginKnown
+  fi
 else
-    #send error messages if any
-    sendError
+  #send error messages if any
+  sendError
 fi
