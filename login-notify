@@ -1,7 +1,7 @@
 #!/bin/env bash
 
-#LoginNotify v1.2 by Xpyct. https://github.com/Xpyctiks/loginNotify
-#release 1.2.000
+#LoginNotify v1.3 by Xpyct. https://github.com/Xpyctiks/loginNotify
+#release 1.3.000
 
 PATH=/bin:/usr/bin:/usr/sbin/:/usr/local/bin
 #token of your Telegram chat API
@@ -10,15 +10,15 @@ token=""
 chat=""
 sessType=""
 #Name of settings file.
-confFile="./login-notify.local"
-#Error-log file.It is created if script has some errors during launch
-errLog="/tmp/login-notify.errors"
+confFile="login-notify.local"
 #logger check
 loggerInstalled=""
 #Variables for db connect.Will be filled in from settings file.
 dbName=""
 dbUser=""
 dbPass=""
+dbHost=""
+dbPort=""
 #Getting hostname.Try to get full FQDN from the mailname, if not - just get local hostname
 if [[ -s /etc/mailname ]]; then
     hostName="$(cat /etc/mailname)"
@@ -34,6 +34,12 @@ Green='\033[0;32m'
 Yellow='\033[0;33m'
 #Tag for Syslog usage
 Tag="LOGIN-NOTIFY"
+# #Using global variables from PAM_EXEC
+declare -x PAM_USER
+declare -x PAM_RHOST
+declare -x PAM_TYPE
+declare -x PAM_TTY
+declare -x PAM_SERVICE
 
 #Head to the current directory of the script it has been launched from. Check if we are launched from symlink or any other place as subshell process.
 echo "${0}" | egrep -e '^\..*' > /dev/null 2>&1
@@ -69,17 +75,23 @@ function logError()
 #check config file.Get values from it if it is found, or creating new one if it is not.
 if ! [[ -f "${confFile}" ]]; then
   if [[ "${launchFrom}" == "shell" ]]; then
-	  echo -e "${Yellow}Warning! ${confFile} with all important settings is not found and it was created. Please, fill in the file and then this program will works!${Color_Off}"
-    logError "Warning! ${confFile} with all important settings is not found and it was created. Please, fill in the file and then this program will works!"
+	  echo -e "${Yellow}Warning! $(pwd)${confFile} with all important settings is not found and it was created. Please, fill in the file and then this program will works!${Color_Off}"
+    logError "Warning! $(pwd)${confFile} with all important settings is not found and it was created. Please, fill in the file and then this program will works!"
 	  cat << EOF > "${confFile}"
-#User for access to DB for write logs.
+#User for DB where list of IP addresses are stored
 dbUser="LoginNotify"
 
-#Password for access to DB for write logs.
+#Password for DB.
 dbPass=""
 
-#DB name.If empty - will not use mysql at all for logging.See README
+#DB name
 dbName="LoginNotify"
+
+#DB host
+dbHost="127.0.0.1"
+
+#DB port
+dbPort=3306
 
 #Telegram api token. Looks like 123456789:abcdefghigklmnopqrstuvwxyz
 telegramToken=""
@@ -97,16 +109,16 @@ else
   #getting all necessary variables from external file
   source "${confFile}"
   #checking all variables are set. No empty one.
-  if [[ -z "${dbUser}" ]] || [[ -z "${dbPass}" ]] || [[ -z "${dbName}" ]] || [[ -z "${telegramChat}" ]] || [[ -z "${telegramToken}" ]]; then
+  if [[ -z "${dbUser}" ]] || [[ -z "${dbPass}" ]] || [[ -z "${dbName}" ]] || [[ -z "${dbHost}" ]] || [[ -z "${dbPort}" ]] || [[ -z "${telegramChat}" ]] || [[ -z "${telegramToken}" ]]; then
     if [[ "${launchFrom}" == "shell" ]]; then  
       echo -e "${Red}Error! Some important variables in ${confFile} are empty!${Color_Off}"
-      echo -e "${Yellow}dbUser=${dbUser}\ndbPass=${dbPass}\ndbName=${dbName}\ntelegramToken=${telegramToken}\ntelegramChat=${telegramChat}${Color_Off}"
-      logError "Error! Some important variables in ${confFile} are empty!"
-      logError "dbUser=${dbUser};dbPass=${dbPass};dbName=${dbName};telegramToken=${telegramToken};telegramChat=${telegramChat}"
+      echo -e "${Yellow}dbUser=${dbUser}\ndbPass=${dbPass}\ndbName=${dbName}\ndbHost=${dbHost}\ndbPort=${dbPort}\ntelegramToken=${telegramToken}\ntelegramChat=${telegramChat}${Color_Off}"
+      logError "Error! Some important variables in $(pwd)${confFile} are empty!"
+      logError "dbUser=${dbUser};dbPass=${dbPass};dbName=${dbName};dbHost=${dbHost};dbPort=${dbPort};telegramToken=${telegramToken};telegramChat=${telegramChat}"
       exit 1
     elif [[ "${launchFrom}" == "cron" ]]; then
-      logError "Error! Some important variables in ${confFile} are empty!"
-      logError "dbUser=${dbUser};dbPass=${dbPass};dbName=${dbName};telegramToken=${telegramToken};telegramChat=${telegramChat}"
+      logError "Error! Some important variables in $(pwd)${confFile} are empty!"
+      logError "dbUser=${dbUser};dbPass=${dbPass};dbName=${dbName};dbHost=${dbHost};dbPort=${dbPort};telegramToken=${telegramToken};telegramChat=${telegramChat}"
       exit 1
     fi
   fi
@@ -148,9 +160,9 @@ if [[ "${1}" == "initDB" ]]; then
   #decide what method of mysql auth should we use - with pwd or not
   addition=""
   if [[ "${2}" == "-" ]]; then
-    addition="-uroot"
+    addition="-uroot -h${dbHost} -P${dbPort}"
   else
-    addition="-uroot -p${2}"
+    addition="-uroot -h${dbHost} -P${dbPort} -p${2}"
   fi
 #main function. shoudn't start with any tab.
 mysql "${addition}" << EOF
@@ -201,7 +213,7 @@ if [[ "${1}" == "addIP" ]]; then
     exit 1
   fi
 #mysql function. shoudn't start with any tab.
-mysql -u"${dbUser}" -p"${dbPass}" << EOF
+mysql -u"${dbUser}" -p"${dbPass}" -h"${dbHost}" -P"${dbPort}" << EOF
 USE \`${dbName}\`;
 INSERT INTO \`tIPs\` (\`IP\`, \`Comment\`) VALUES ('${2}', '${3}');
 EOF
@@ -229,7 +241,7 @@ if [[ "${1}" == "delIP" ]]; then
     exit 1
   fi
 #mysql function. shoudn't start with any tab.
-mysql -u"${dbUser}" -p"${dbPass}" << EOF
+mysql -u"${dbUser}" -p"${dbPass}" -h"${dbHost}" -P"${dbPort}" << EOF
 USE \`${dbName}\`;
 DELETE FROM \`tIPs\` WHERE IP='${2}';
 EOF
@@ -248,11 +260,11 @@ if [[ -z ${PAM_RHOST} || -z ${PAM_TYPE} || -z ${PAM_USER} ]]; then
   if [[ "${launchFrom}" == "shell" ]]; then
     echo -e "${Red}Can't get PAM variables. Seems like the script launched no by PAM. Exiting.${Color_Off}"
     echo -e "${Yellow}Use --help parameter to get help information.${Color_Off}"
-    errLog "Can't get PAM variables. Seems like the script launched no by PAM. Exiting..."
-    errLog "RHOST=${PAM_RHOST};TYPE=${PAM_TYPE};USER=${PAM_USER}"
+    logError "Can't get PAM variables. Seems like the script launched no by PAM. Exiting..."
+    logError "RHOST=${PAM_RHOST};TYPE=${PAM_TYPE};USER=${PAM_USER}"
   elif [[ "${launchFrom}" == "cron" ]]; then
-    errLog "Can't get PAM variables. Seems like the script launched no by PAM. Exiting..."
-    errLog "RHOST=${PAM_RHOST};TYPE=${PAM_TYPE};USER=${PAM_USER}"
+    logError "Can't get PAM variables. Seems like the script launched no by PAM. Exiting..."
+    logError "RHOST=${PAM_RHOST};TYPE=${PAM_TYPE};USER=${PAM_USER}"
   fi
   exit 1
 fi
@@ -261,20 +273,16 @@ fi
 function sendError()
 {
   subj="☢ Mysql error! ${sessType} ${hostName}"
-  message="Some errors with mysql request!\nUser: ${PAM_USER} - `date '+%H:%M:%S %d.%m.%Y'` ${PAM_RHOST}"
-  curl  --header "Content-Type: application/json" --request "POST" --data "{\"chat_id\":\"${chat}\",\"text\":\"${subj}\n${message}\"}" "https://api.telegram.org/bot${token}/sendMessage"
-  errLog "${message}"
+  message="Some errors with mysql request!\nUser: ${PAM_USER} - `date '+%H:%M:%S %d.%m.%Y'` ${PAM_RHOST} ${PAM_SERVICE} ${PAM_TTY}"
+  curl  --header "Content-Type: application/json" --request "POST" --data "{\"chat_id\":\"${telegramChat}\",\"text\":\"${subj}\n${message}\"}" "https://api.telegram.org/bot${telegramToken}/sendMessage"
+  logError "${message}"
 }
 
 #This functions execute actions with addr which exists in DB. So it is whitelisted.
 function loginKnown()
 {
-  #Using global variables from PAM_EXEC
-  global PAM_USER
-  global PAM_RHOST
-  global PAM_TYPE
   #Getting comment for current IP to add to login message - usefull to understand who's coming.
-  Comment=`mysql -u"${dbUser}" -p"${dbPass}" -sN -e "use ${dbName};select Comment from tIPs where IP='${PAM_RHOST}'"`
+  Comment=$(mysql -u"${dbUser}" -p"${dbPass}" -h"${dbHost}" -P"${dbPort}" -sN -e "use ${dbName};select Comment from tIPs where IP='${PAM_RHOST}'")
   if [[ "${?}" == "0" ]]; then
     #Selecting correct type of action and adding an icon to subject about
     if [[ "${PAM_TYPE}" == "open_session" ]]; then
@@ -286,8 +294,8 @@ function loginKnown()
         sessType+=" Logout from "
     fi
     subj="${sessType} ${hostName}"
-    message="User: ${PAM_USER} - `date '+%H:%M:%S %d.%m.%Y'`\n${PAM_RHOST} ${Comment}"
-    curl  --header "Content-Type: application/json" --request "POST" --data "{\"chat_id\":\"${chat}\",\"text\":\"${subj}\n${message}\"}" "https://api.telegram.org/bot${token}/sendMessage" & > /dev/null 2>&1
+    message="User: ${PAM_USER} Service: ${PAM_SERVICE} TTY: ${PAM_TTY} - `date '+%H:%M:%S %d.%m.%Y'`\n${PAM_RHOST} ${Comment}"
+    curl  --header "Content-Type: application/json" --request "POST" --data "{\"chat_id\":\"${telegramChat}\",\"text\":\"${subj}\n${message}\"}" "https://api.telegram.org/bot${telegramToken}/sendMessage" & > /dev/null 2>&1
   else
     #send error message to Telegram if any
     sendError
@@ -297,10 +305,6 @@ function loginKnown()
 #This functions execute actions with addr which doesn't exists in DB. So it is unknown for us.
 function loginUnknown()
 {
-  #Using global variables from PAM_EXEC
-  global PAM_USER
-  global PAM_RHOST
-  global PAM_TYPE
   #Trying to get info about country from whois
   country=$(whois ${PAM_RHOST} | grep -i country | head -1)
   if [[ "${?}" == "0" ]]; then
@@ -330,12 +334,12 @@ function loginUnknown()
     sessType+=" Logout from unconfirmed addr "
   fi
   subj="${sessType} ${hostName}"
-  message="User: ${PAM_USER} - `date '+%H:%M:%S %d.%m.%Y'`\nIP: ${PAM_RHOST}\n${country}\n${descr}"
-  curl  --header "Content-Type: application/json" --request "POST" --data "{\"chat_id\":\"${chat}\",\"text\":\"${subj}\n${message}\"}" "https://api.telegram.org/bot${token}/sendMessage" & > /dev/null 2>&1
+  message="User: ${PAM_USER} Service: ${PAM_SERVICE} TTY: ${PAM_TTY} - `date '+%H:%M:%S %d.%m.%Y'`\nIP: ${PAM_RHOST}\n${country}\n${descr}"
+  curl  --header "Content-Type: application/json" --request "POST" --data "{\"chat_id\":\"${telegramChat}\",\"text\":\"${subj}\n${message}\"}" "https://api.telegram.org/bot${telegramToken}/sendMessage" & > /dev/null 2>&1
 }
 
 #Main function. Making request to DB and routing the result to the procedure how to proceed the connection futher
-RES=$(mysql -u$"{dbUser}" -p"${dbPass}" -sN -e "use ${dbName};select * from tIPs where IP='${PAM_RHOST}'")
+RES=$(mysql -u"${dbUser}" -p"${dbPass}" -h"${dbHost}" -P"${dbPort}" -sN -e "use ${dbName};select * from tIPs where IP='${PAM_RHOST}'")
 if [[ "${?}" == "0" ]]; then
   if [[ "${RES}" == "" ]]; then
     #go to functions of unknown ip
