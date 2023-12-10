@@ -19,12 +19,8 @@ dbUser=""
 dbPass=""
 dbHost=""
 dbPort=""
-#Getting hostname.Try to get full FQDN from the mailname, if not - just get local hostname
-if [[ -s /etc/mailname ]]; then
-    hostName="$(cat /etc/mailname)"
-else
-    hostName="$(hostname)"
-fi
+#Getting hostname.
+hostName="$(hostname)"
 #Variable for keep launch env. in
 launchFrom=""
 #Colors
