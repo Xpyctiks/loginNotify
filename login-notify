@@ -312,7 +312,7 @@ function loginKnown()
         sessType+=" Logout from "
       fi
       subj="${sessType} ${hostName}"
-      message="User: ${PAM_TYPE} ${PAM_USER} Service: ${PAM_SERVICE} TTY: ${PAM_TTY} - `date '+%H:%M:%S %d.%m.%Y'`\n${PAM_RHOST} ${Comment}"
+      message="User: ${PAM_USER} Service: ${PAM_SERVICE} TTY: ${PAM_TTY} - `date '+%H:%M:%S %d.%m.%Y'`\n${PAM_RHOST} ${Comment}"
       logError "PAM: Type:${PAM_TYPE} User:${PAM_USER} Service:${PAM_SERVICE} TTY:${PAM_TTY} - `date '+%H:%M:%S %d.%m.%Y'` IP:${PAM_RHOST} Comment:${Comment}"
       curl  --header "Content-Type: application/json" --request "POST" --data "{\"chat_id\":\"${telegramChat}\",\"text\":\"${subj}\n${message}\"}" "https://api.telegram.org/bot${telegramToken}/sendMessage" & > /dev/null 2>&1
       if [[ "${?}" != "0" ]]; then
