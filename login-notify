@@ -46,7 +46,7 @@ echo "${0}" | egrep -e '^\..*' > /dev/null 2>&1
 if [[ "${?}" == "0" ]]; then
   #the script is launched from shell manually
   scriptName=$(echo "${0}" | sed 's/.//')
-  scriptPath=$(realpath -e ${0} | sed "s/\\${scriptName}//")
+  scriptPath=$(realpath -e "${0}" | sed "s/\\${scriptName}//")
   launchFrom="shell"
   cd "${scriptPath}"
 else
@@ -188,6 +188,7 @@ EOF
     echo -e "\tdbUser=\"${4}\""
     echo -e "\tdbPass=\"${5}\"${Color_Off}"
     echo -e "${Yellow}and finally: Add to the end of /etc/pam.d/sshd next string: \"session optional pam_exec.so $(pwd)/$(basename ${0})\"${Color_Off}"
+    echo -e "${Yellow}If you want to log TTYs: add to the end of /etc/pam.d/login next string: \"session optional pam_exec.so $(pwd)/$(basename ${0})\"${Color_Off}"
     exit 0
   else
     echo -e "${Red}DB is NOT initialized because of some errors - unable to connect/DB already exists/etc. Needs to be checked manually.${Color_Off}"
