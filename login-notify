@@ -150,14 +150,12 @@ if [[ "${1}" == "initDB" ]]; then
   #check do we have enough parameters,else show up a hint.
   if [[ "${#}" -lt 5 ]]; then
     echo -e "${Yellow}Usage: ./<this_script_name> initDB ${Green}<mysql_root_pwd> <db_name> <db_user> <db_pwd>${Color_Off}"
-    echo -e "\t${Green}<mysql_root_pwd>${Color_Off} - password of mysql root account to create everything we need. Type \"-\" if not need to use pwd for root access to mysql\n\t${Green}<db_name>${Color_Off} - The name of DB you want to create\n\t${Green}<db_user>${Color_Off} - user of the new DB\n\t${Green}<db_pwd>${Color_Off} - password you want to set for new DB\n"
+    echo -e "\t${Green}<mysql_root_pwd>${Color_Off} - password of mysql root account to create everything we need. Type \"-\" if not need to use pwd for root access to mysql(~/.my.cnf config is used)\n\t${Green}<db_name>${Color_Off} - The name of DB you want to create\n\t${Green}<db_user>${Color_Off} - user of the new DB\n\t${Green}<db_pwd>${Color_Off} - password you want to set for new DB\n"
     exit 1
   fi
   #decide what method of mysql auth should we use - with pwd or not
   addition=""
-  if [[ "${2}" == "-" ]]; then
-    addition="-uroot -h${dbHost} -P${dbPort}"
-  else
+  if [[ "${2}" != "-" ]]; then
     addition="-uroot -h${dbHost} -P${dbPort} -p${2}"
   fi
 #main function. shoudn't start with any tab.
