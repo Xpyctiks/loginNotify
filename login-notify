@@ -1,7 +1,7 @@
 #!/bin/env bash
 
-#LoginNotify v1.3 by Xpyct. https://github.com/Xpyctiks/loginNotify
-#release 1.3.000
+#LoginNotify v1.4 by Xpyct. https://github.com/Xpyctiks/loginNotify
+#release 1.4.000
 
 PATH=/bin:/usr/bin:/usr/sbin/:/usr/local/bin
 #token of your Telegram chat API
@@ -19,6 +19,8 @@ dbUser=""
 dbPass=""
 dbHost=""
 dbPort=""
+#mysql binary
+mysqlApp=""
 #Getting hostname.
 hostName="$(hostname)"
 #Variable for keep launch env. in
@@ -86,14 +88,20 @@ dbName="LoginNotify"
 #DB host
 dbHost="127.0.0.1"
 
-#DB port
+#DB port.Default enabled.Priority "low" if both enabled with socket.
 dbPort=3306
+
+#Mysql socket. Disabled by default.Priority "high" if both enabled with port.
+#socket="/var/run/mysql.sock"
 
 #Telegram api token. Looks like 123456789:abcdefghigklmnopqrstuvwxyz
 telegramToken=""
 
 #Telegram chat_id. 9 digits usually.
 telegramChat=""
+
+#set path and name of mysql application.Can be absolute or relative
+mysqlApp="mysql"
 
 EOF
 	  exit 1
@@ -156,10 +164,15 @@ if [[ "${1}" == "initDB" ]]; then
   #decide what method of mysql auth should we use - with pwd or not
   addition=""
   if [[ "${2}" != "-" ]]; then
-    addition="-uroot -h${dbHost} -P${dbPort} -p${2}"
+    if [[ -s "${socket}" ]]; then
+      conn="-S ${socket}"
+    else
+      conn="-P${dbPort}"
+  fi
+    addition="-h${dbHost} -uroot -p${2} ${conn}"
   fi
 #main function. shoudn't start with any tab.
-mysql "${addition}" << EOF
+"${mysqlApp} ${addition}" << EOF
 CREATE DATABASE \`${3}\` DEFAULT CHARACTER SET utf8 COLLATE utf8_bin;
 USE \`${3}\`;
 CREATE TABLE \`tIPs\` (
@@ -208,7 +221,12 @@ if [[ "${1}" == "addIP" ]]; then
     exit 1
   fi
 #mysql function. shoudn't start with any tab.
-mysql -u"${dbUser}" -p"${dbPass}" -h"${dbHost}" -P"${dbPort}" << EOF
+if [[ -s "${socket}" ]]; then
+  conn="-S ${socket}"
+else
+  conn="-P${dbPort}"
+fi
+"${mysqlApp} -u${dbUser} -p${dbPass} -h${dbHost} ${conn}" << EOF
 USE \`${dbName}\`;
 INSERT INTO \`tIPs\` (\`IP\`, \`Comment\`) VALUES ('${2}', '${3}');
 EOF
@@ -236,7 +254,12 @@ if [[ "${1}" == "delIP" ]]; then
     exit 1
   fi
 #mysql function. shoudn't start with any tab.
-mysql -u"${dbUser}" -p"${dbPass}" -h"${dbHost}" -P"${dbPort}" << EOF
+if [[ -s "${socket}" ]]; then
+  conn="-S ${socket}"
+else
+  conn="-P${dbPort}"
+fi
+"${mysqlApp} -u${dbUser} -p${dbPass} -h${dbHost} ${conn}" << EOF
 USE \`${dbName}\`;
 DELETE FROM \`tIPs\` WHERE IP='${2}';
 EOF
@@ -388,7 +411,12 @@ function loginUnknown()
 }
 
 #Main function. Making request to DB and routing the result to the procedure how to proceed the connection futher
-RES=$(mysql -u"${dbUser}" -p"${dbPass}" -h"${dbHost}" -P"${dbPort}" -sN -e "use ${dbName};select * from tIPs where IP='${PAM_RHOST}'")
+if [[ -s "${socket}" ]]; then
+  conn="-S ${socket}"
+else
+  conn="-P${dbPort}"
+fi
+RES=$("${mysqlApp} -u${dbUser} -p${dbPass} -h${dbHost} ${conn}" -sN -e "use ${dbName};select * from tIPs where IP='${PAM_RHOST}'")
 if [[ "${?}" == "0" ]]; then
   if [[ "${RES}" == "" ]]; then
     #go to functions of unknown ip
