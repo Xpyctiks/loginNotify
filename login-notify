@@ -322,7 +322,12 @@ function loginKnown()
   #if login session via SSH.
   elif [[ ! -z "${PAM_TYPE}" && ! -z "${PAM_SERVICE}" && ! -z "${PAM_RHOST}" ]]; then
     #Getting comment for current IP to add to login message - usefull to understand who's coming.
-    Comment=$(mysql -u"${dbUser}" -p"${dbPass}" -h"${dbHost}" -P"${dbPort}" -sN -e "use ${dbName};select Comment from tIPs where IP='${PAM_RHOST}'")
+    if [[ ! -z "${socket}" ]]; then
+      conn="-S${socket}"
+    else
+      conn="-h${dbHost} -P${dbPort}"
+    fi
+    Comment=$("${mysqlApp}" -u"${dbUser}" -p"${dbPass}" "${conn}" -sN -e "use ${dbName};select Comment from tIPs where IP='${PAM_RHOST}'")
     if [[ "${?}" == "0" ]]; then
       #Selecting correct type of action and adding an icon to subject about
       if [[ "${PAM_TYPE}" == "open_session" ]]; then
@@ -417,7 +422,7 @@ if [[ ! -z "${socket}" ]]; then
 else
   conn="-h${dbHost} -P${dbPort}"
 fi
-RES=$("${mysqlApp} -u${dbUser} -p${dbPass} ${conn} -sN -e \"use ${dbName};select * from tIPs where IP='${PAM_RHOST}'\"")
+RES=$("${mysqlApp}" -u"${dbUser}" -p"${dbPass}" "${conn}" -sN -e "use ${dbName};select * from tIPs where IP='${PAM_RHOST}'")
 if [[ "${?}" == "0" ]]; then
   if [[ "${RES}" == "" ]]; then
     #go to functions of unknown ip
