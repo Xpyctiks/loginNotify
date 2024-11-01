@@ -19,6 +19,7 @@ dbUser=""
 dbPass=""
 dbHost=""
 dbPort=""
+socket=""
 #mysql binary
 mysqlApp=""
 #Getting hostname.
@@ -164,12 +165,12 @@ if [[ "${1}" == "initDB" ]]; then
   #decide what method of mysql auth should we use - with pwd or not
   addition=""
   if [[ "${2}" != "-" ]]; then
-    if [[ -s "${socket}" ]]; then
-      conn="-S ${socket}"
+    if [[ ! -z "${socket}" ]]; then
+      conn="-S${socket}"
     else
-      conn="-P${dbPort}"
+      conn="-h${dbHost} -P${dbPort}"
   fi
-    addition="-h${dbHost} -uroot -p${2} ${conn}"
+    addition="-uroot -p${2} ${conn}"
   fi
 #main function. shoudn't start with any tab.
 "${mysqlApp} ${addition}" << EOF
@@ -221,12 +222,12 @@ if [[ "${1}" == "addIP" ]]; then
     exit 1
   fi
 #mysql function. shoudn't start with any tab.
-if [[ -s "${socket}" ]]; then
-  conn="-S ${socket}"
+if [[ ! -z "${socket}" ]]; then
+  conn="-S${socket}"
 else
-  conn="-P${dbPort}"
+  conn="-h${dbHost} -P${dbPort}"
 fi
-"${mysqlApp} -u${dbUser} -p${dbPass} -h${dbHost} ${conn}" << EOF
+"${mysqlApp} -u${dbUser} -p${dbPass} ${conn}" << EOF
 USE \`${dbName}\`;
 INSERT INTO \`tIPs\` (\`IP\`, \`Comment\`) VALUES ('${2}', '${3}');
 EOF
@@ -254,12 +255,12 @@ if [[ "${1}" == "delIP" ]]; then
     exit 1
   fi
 #mysql function. shoudn't start with any tab.
-if [[ -s "${socket}" ]]; then
-  conn="-S ${socket}"
+if [[ ! -z "${socket}" ]]; then
+  conn="-S${socket}"
 else
-  conn="-P${dbPort}"
+  conn="-h${dbHost} -P${dbPort}"
 fi
-"${mysqlApp} -u${dbUser} -p${dbPass} -h${dbHost} ${conn}" << EOF
+"${mysqlApp} -u${dbUser} -p${dbPass} ${conn}" << EOF
 USE \`${dbName}\`;
 DELETE FROM \`tIPs\` WHERE IP='${2}';
 EOF
@@ -411,12 +412,12 @@ function loginUnknown()
 }
 
 #Main function. Making request to DB and routing the result to the procedure how to proceed the connection futher
-if [[ -s "${socket}" ]]; then
-  conn="-S ${socket}"
+if [[ ! -z "${socket}" ]]; then
+  conn="-S${socket}"
 else
-  conn="-P${dbPort}"
+  conn="-h${dbHost} -P${dbPort}"
 fi
-RES=$("${mysqlApp} -u${dbUser} -p${dbPass} -h${dbHost} ${conn}" -sN -e "use ${dbName};select * from tIPs where IP='${PAM_RHOST}'")
+RES=$("${mysqlApp} -u${dbUser} -p${dbPass} ${conn} -sN -e \"use ${dbName};select * from tIPs where IP='${PAM_RHOST}'\"")
 if [[ "${?}" == "0" ]]; then
   if [[ "${RES}" == "" ]]; then
     #go to functions of unknown ip
